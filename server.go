@@ -76,6 +76,9 @@ func (s *Server) serve() error {
 		}
 
 		rw, err := s.listener.Accept()
+		if err != nil {
+			return err
+		}
 
 		if s.ReadTimeout != 0 {
 			rw.SetReadDeadline(time.Now().Add(s.ReadTimeout))
@@ -83,15 +86,8 @@ func (s *Server) serve() error {
 		if s.WriteTimeout != 0 {
 			rw.SetWriteDeadline(time.Now().Add(s.WriteTimeout))
 		}
-		if nil != err {
-			if opErr, ok := err.(*net.OpError); ok || opErr.Timeout() {
-				continue
-			}
-			Logger.Println(err)
-		}
 
 		cli, err := s.newClient(rw)
-
 		if err != nil {
 			continue
 		}
