@@ -64,7 +64,7 @@ func main() {
 	//SSL
 	secureConn := func(s *ldap.Server) {
 		config, _ := getTLSconfig()
-		s.Listener = tls.NewListener(s.Listener, config)
+		s.listener = tls.NewListener(s.listener, config)
 	}
 	go server.ListenAndServe(":10636", secureConn)
 

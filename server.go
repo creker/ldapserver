@@ -2,6 +2,7 @@ package ldapserver
 
 import (
 	"bufio"
+	"crypto/tls"
 	"net"
 	"sync"
 	"time"
@@ -9,19 +10,22 @@ import (
 
 // Server is an LDAP server.
 type Server struct {
-	Listener     net.Listener
-	ReadTimeout  time.Duration  // optional read timeout
-	WriteTimeout time.Duration  // optional write timeout
-	wg           sync.WaitGroup // group of goroutines (1 by client)
-	chDone       chan bool      // Channel Done, value => shutdown
+	// Handler handles ldap message received from client
+	// it SHOULD "implement" RequestHandler interface
+	Handler Handler
+
+	TLSConfig *tls.Config
+
+	ReadTimeout  time.Duration // optional read timeout
+	WriteTimeout time.Duration // optional write timeout
 
 	// OnNewConnection, if non-nil, is called on new connections.
 	// If it returns non-nil, the connection is closed.
 	OnNewConnection func(c net.Conn) error
 
-	// Handler handles ldap message received from client
-	// it SHOULD "implement" RequestHandler interface
-	Handler Handler
+	listener net.Listener
+	wg       sync.WaitGroup // group of goroutines (1 by client)
+	chDone   chan bool      // Channel Done, value => shutdown
 }
 
 //NewServer return a LDAP Server
@@ -43,29 +47,19 @@ func (s *Server) Handle(h Handler) {
 // ListenAndServe listens on the TCP network address s.Addr and then
 // calls Serve to handle requests on incoming connections.  If
 // s.Addr is blank, ":389" is used.
-func (s *Server) ListenAndServe(addr string, options ...func(*Server)) error {
+func (s *Server) Serve(listener net.Listener) error {
+	s.listener = listener
+	return s.serve()
+}
 
-	if addr == "" {
-		addr = ":389"
-	}
-
-	var e error
-	s.Listener, e = net.Listen("tcp", addr)
-	if e != nil {
-		return e
-	}
-	Logger.Printf("Listening on %s\n", addr)
-
-	for _, option := range options {
-		option(s)
-	}
-
+func (s *Server) ServeTLS(listener net.Listener) error {
+	s.listener = tls.NewListener(listener, s.TLSConfig)
 	return s.serve()
 }
 
 // Handle requests messages on the ln listener
 func (s *Server) serve() error {
-	defer s.Listener.Close()
+	defer s.listener.Close()
 
 	if s.Handler == nil {
 		Logger.Panicln("No LDAP Request Handler defined")
@@ -76,13 +70,12 @@ func (s *Server) serve() error {
 	for {
 		select {
 		case <-s.chDone:
-			Logger.Print("Stopping server")
-			s.Listener.Close()
+			s.listener.Close()
 			return nil
 		default:
 		}
 
-		rw, err := s.Listener.Accept()
+		rw, err := s.listener.Accept()
 
 		if s.ReadTimeout != 0 {
 			rw.SetReadDeadline(time.Now().Add(s.ReadTimeout))
@@ -105,12 +98,10 @@ func (s *Server) serve() error {
 
 		i = i + 1
 		cli.Numero = i
-		Logger.Printf("Connection client [%d] from %s accepted", cli.Numero, cli.rwc.RemoteAddr().String())
+		Logger.Printf("[info] client [%d] from %s accepted", cli.Numero, cli.rwc.RemoteAddr().String())
 		s.wg.Add(1)
 		go cli.serve()
 	}
-
-	return nil
 }
 
 // Return a new session with the connection
@@ -136,8 +127,9 @@ func (s *Server) newClient(rwc net.Conn) (c *client, err error) {
 // transport connection.
 // In either case, when the LDAP session is terminated.
 func (s *Server) Stop() {
+	_ = s.listener.Close()
 	close(s.chDone)
-	Logger.Print("gracefully closing client connections...")
+	Logger.Print("[info] gracefully closing client connections...")
 	s.wg.Wait()
-	Logger.Print("all clients connection closed")
+	Logger.Print("[info] all client connections closed")
 }
