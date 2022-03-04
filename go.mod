@@ -1,4 +1,4 @@
-module github.com/For-ACGN/ldapserver
+module github.com/creker/ldapserver
 
 go 1.14
 
