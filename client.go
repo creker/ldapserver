@@ -81,11 +81,13 @@ func (c *client) serve() {
 	}()
 
 	// Listen for server signal to shutdown
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
+
 		for {
 			select {
 			case <-c.srv.chDone: // server signals shutdown process
-				c.wg.Add(1)
 				r := NewExtendedResponse(LDAPResultUnwillingToPerform)
 				r.SetDiagnosticMessage("server is about to stop")
 				r.SetResponseName(NoticeOfDisconnection)
@@ -93,7 +95,6 @@ func (c *client) serve() {
 				m := ldap.NewLDAPMessageWithProtocolOp(r)
 
 				c.chanOut <- m
-				c.wg.Done()
 				c.rwc.SetReadDeadline(time.Now().Add(time.Millisecond))
 				return
 			case <-c.closing:
